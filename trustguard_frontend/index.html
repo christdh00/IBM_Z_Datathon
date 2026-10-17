@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TrustGuard Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="dashboard.js" defer></script>
+</head>
+<body>
+  <main class="dashboard">
+    <header class="header">
+      <div><p class="eyebrow">IBM Z DATATHON</p><h1>TrustGuard Monitor</h1><p class="subtitle">Model anomaly score monitoring</p></div>
+      <div class="actions"><span class="status" id="status">● Demo mode</span><button id="demoButton" type="button">Add demo reading</button><button id="resetButton" class="secondary" type="button">Reset</button></div>
+    </header>
+    <section class="scores" aria-label="Current TrustGuard scores">
+      <article class="score-card"><h2>ML Model</h2><p id="mlScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
+      <article class="score-card"><h2>Survival Model</h2><p id="survivalScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
+      <article class="score-card"><h2>Anomaly Model</h2><p id="anomalyScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
+    </section>
+    <section class="chart-card"><div class="chart-heading"><div><h2>Score trends</h2><p class="subtitle">TrustGuard scores over time</p></div><span id="lastUpdated" class="meta">No readings yet</span></div><div class="chart-wrap"><canvas id="scoreChart" aria-label="TrustGuard score trend chart" role="img"></canvas></div><p class="hint">Placeholder data is for frontend testing only. No scores are actual model results, and no alert thresholds are assumed.</p></section>
+  </main>
+</body>
+</html>
