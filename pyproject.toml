@@ -18,3 +18,8 @@ managed = true
 
 [tool.uv.workspace]
 members = []
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.4.0",
+]
