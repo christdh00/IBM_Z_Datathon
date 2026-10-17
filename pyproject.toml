@@ -12,3 +12,9 @@ dependencies = [
     "scipy==1.15.3",
     "xgboost==3.3.0",
 ]
+
+[tool.uv]
+managed = true
+
+[tool.uv.workspace]
+members = []
