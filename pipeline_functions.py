@@ -137,3 +137,48 @@ def lag_window(dataframe, rw):
     if labels is not None:
         result[label_name] = labels.iloc[rw - 1 :].to_numpy()
     return result
+
+
+def undo_scale_pos_weight(proba, scale_pos_weight):
+    """Map class-weighted probabilities back toward the original prevalence.
+
+    ``scale_pos_weight`` multiplies the positive class in the training loss.
+    That is the same as training where each positive row is repeated
+    ``scale_pos_weight`` times, so a fitted probability ``p_w`` satisfies
+
+        p_w / (1 - p_w) = scale_pos_weight * p / (1 - p).
+
+    The probability on the original prevalence is
+
+        p = p_w / (p_w + scale_pos_weight * (1 - p_w)).
+
+    Parameters
+    ----------
+    proba : array-like
+        Predicted probabilities from a model trained with ``scale_pos_weight``.
+        Every value must be finite and lie in ``[0, 1]``.
+    scale_pos_weight : float
+        Positive class weight used in training. Must be finite and positive.
+        A weight of ``1`` leaves the probabilities unchanged.
+
+    Returns
+    -------
+    numpy.ndarray
+        Probabilities on the unweighted prevalence, with the same shape as
+        ``proba``.
+
+    Raises
+    ------
+    ValueError
+        ``scale_pos_weight`` is not a positive finite number, or a probability
+        is non-finite or outside ``[0, 1]``.
+    """
+    weighted = np.asarray(proba, dtype=float)
+    weight = float(scale_pos_weight)
+    if not np.isfinite(weight) or weight <= 0:
+        raise ValueError("scale_pos_weight must be a positive finite number")
+    if weighted.size and (
+        not np.isfinite(weighted).all() or weighted.min() < 0 or weighted.max() > 1
+    ):
+        raise ValueError("proba values must be finite and lie in [0, 1]")
+    return weighted / (weighted + weight * (1.0 - weighted))
