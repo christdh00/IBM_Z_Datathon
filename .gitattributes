@@ -1,0 +1,12 @@
+# Automatically handle text files
+* text=auto
+
+# Consistent line endings across platforms
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.ipynb text eol=lf
+*.txt text eol=lf
+
+# Windows PowerShell scripts
+*.ps1 text eol=crlf
