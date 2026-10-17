@@ -1,4 +1,3 @@
-from collections import deque
 from pathlib import Path
 
 import pandas as pd
@@ -31,51 +30,36 @@ COLUMNS = [
 ]
 
 
-class StreamScorer:
-    """Score each streamed row once a 30-minute reading window is available."""
+class FailureModel:
+    """Predict a failure probability from one 30-minute reading window."""
 
     def __init__(self, model_path: Path = MODEL_PATH) -> None:
+        self.window_minutes = WINDOW_MINUTES
         self.model = xgb.Booster()
         self.model.load_model(model_path)
         best_iteration = self.model.attr("best_iteration")
         self.iteration_range = (
             (0, int(best_iteration) + 1) if best_iteration is not None else None
         )
-        self.rows: deque[dict] = deque(maxlen=WINDOW_MINUTES)
-        self._last_index: int | None = None
 
-    def score(self, streamed: dict) -> dict:
-        index = streamed["index"]
-        if self._last_index is not None and index <= self._last_index:
-            self.rows.clear()
-        self._last_index = index
+    def predict(self, rows: list[dict]) -> dict:
+        if len(rows) != self.window_minutes:
+            raise ValueError(
+                f"model expects {self.window_minutes} rows, received {len(rows)}"
+            )
+        weighted = self._weighted_probability(rows)
+        probability = float(undo_scale_pos_weight(weighted, SCALE_POS_WEIGHT)[0])
+        return {
+            "failure_probability": probability,
+            "threshold": THRESHOLD,
+            "failure_predicted": probability >= THRESHOLD,
+        }
 
-        record = _record(streamed["record"])
-        self.rows.append(record)
-        payload = _public_row(streamed["index"], streamed["total"], record)
-        payload["window_rows"] = len(self.rows)
-        payload["window_required"] = WINDOW_MINUTES
-
-        if len(self.rows) < WINDOW_MINUTES:
-            payload["status"] = "too_small_window"
-            payload["message"] = "too small window"
-            payload["failure_probability"] = None
-            payload["failure_predicted"] = None
-            return payload
-
-        probability = self._probability()
-        payload["status"] = "ready"
-        payload["message"] = None
-        payload["failure_probability"] = probability
-        payload["threshold"] = THRESHOLD
-        payload["failure_predicted"] = probability >= THRESHOLD
-        return payload
-
-    def _probability(self) -> float:
-        frame = pd.DataFrame(list(self.rows), columns=COLUMNS)
+    def _weighted_probability(self, rows: list[dict]):
+        frame = pd.DataFrame(rows, columns=COLUMNS)
         frame["timestamp"] = pd.to_datetime(frame["timestamp"])
         frame = frame.set_index("timestamp")
-        lagged = lag_window(encode_oxygen_over_threshold(frame), WINDOW_MINUTES)
+        lagged = lag_window(encode_oxygen_over_threshold(frame), self.window_minutes)
         features = lagged.drop(columns=["PW_0.5h"])
         for column in features.columns:
             if column.startswith("Oxygen over threshold_lag_"):
@@ -87,30 +71,4 @@ class StreamScorer:
         predict_kwargs = {}
         if self.iteration_range is not None:
             predict_kwargs["iteration_range"] = self.iteration_range
-        weighted = self.model.predict(matrix, **predict_kwargs)
-        probability = undo_scale_pos_weight(weighted, SCALE_POS_WEIGHT)
-        return float(probability[0])
-
-
-def _record(row: dict) -> dict:
-    return {
-        "timestamp": str(row["timestamp"]),
-        "CMS air pressure": float(row["CMS air pressure"]),
-        "Concentrazione ossigeno base": float(row["Concentrazione ossigeno base"]),
-        "Nitrogen pressure": float(row["Nitrogen pressure"]),
-        "Oxygen over threshold": float(row["Oxygen over threshold"]),
-        "PW_0.5h": int(row["PW_0.5h"]),
-    }
-
-
-def _public_row(index: int, total: int, record: dict) -> dict:
-    return {
-        "index": index,
-        "total": total,
-        "timestamp": record["timestamp"],
-        "cms_air_pressure": record["CMS air pressure"],
-        "oxygen_concentration": record["Concentrazione ossigeno base"],
-        "nitrogen_pressure": record["Nitrogen pressure"],
-        "oxygen_over_threshold": record["Oxygen over threshold"],
-        "pw_0_5h": record["PW_0.5h"],
-    }
+        return self.model.predict(matrix, **predict_kwargs)

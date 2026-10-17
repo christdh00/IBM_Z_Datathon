@@ -5,11 +5,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from app.inference import StreamScorer
+from app.inference import FailureModel
+from app.payload import combine
+from app.readings import ReadingWindow
 from app.replay import ReplayCursor
 
 cursor = ReplayCursor()
-scorer = StreamScorer()
+model = FailureModel()
+window = ReadingWindow(model.window_minutes)
 latest: dict | None = None
 subscribers: set[asyncio.Queue] = set()
 
@@ -52,7 +55,9 @@ PAGE = """<!doctype html>
 
 async def publish(row: dict) -> None:
     global latest
-    latest = scorer.score(row)
+    reading = window.observe(row)
+    prediction = model.predict(reading.rows) if reading.rows is not None else None
+    latest = combine(reading, prediction)
     for queue in list(subscribers):
         queue.put_nowait(latest)
 
