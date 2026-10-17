@@ -1,6 +1,61 @@
 import numpy as np
 import pandas as pd
 
+OXYGEN_OVER_THRESHOLD = "Oxygen over threshold"
+# The stored high value is one float64 step above this decimal.
+_OXYGEN_LEVELS = (
+    (-0.0445689713425745, 0),
+    (22.437134398135598, 1),
+)
+_OXYGEN_MATCH_ATOL = 1e-12
+
+
+def encode_oxygen_over_threshold(dataframe):
+    """Map ``Oxygen over threshold`` onto the binary levels 0 and 1.
+
+    ``-0.0445689713425745`` becomes 0 and ``22.437134398135598`` becomes 1.
+    Any other value cancels the transform.
+
+    Parameters
+    ----------
+    dataframe : pandas.DataFrame
+        A frame that includes ``Oxygen over threshold``. Other columns are copied
+        through unchanged.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of ``dataframe`` whose oxygen column is int 0 or 1.
+
+    Raises
+    ------
+    ValueError
+        The oxygen column is missing, or it contains a value that is neither
+        of the two levels.
+    """
+    if OXYGEN_OVER_THRESHOLD not in dataframe.columns:
+        raise ValueError(f"dataframe must include {OXYGEN_OVER_THRESHOLD!r}")
+
+    values = dataframe[OXYGEN_OVER_THRESHOLD].to_numpy(dtype=float)
+    matched = np.zeros(len(dataframe), dtype=bool)
+    encoded_values = np.zeros(len(dataframe), dtype=np.int8)
+    for level, code in _OXYGEN_LEVELS:
+        is_level = np.isclose(values, level, rtol=0.0, atol=_OXYGEN_MATCH_ATOL)
+        is_level &= np.isfinite(values)
+        encoded_values[is_level] = code
+        matched |= is_level
+
+    if not matched.all():
+        unexpected = np.unique(values[~matched])
+        raise ValueError(
+            f"{OXYGEN_OVER_THRESHOLD} has values other than the two expected levels: "
+            f"{unexpected.tolist()}"
+        )
+
+    encoded = dataframe.copy()
+    encoded[OXYGEN_OVER_THRESHOLD] = encoded_values
+    return encoded
+
 
 def lag_window(dataframe, rw):
     """Flatten a sliding reading window into lag columns.
