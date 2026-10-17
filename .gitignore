@@ -30,3 +30,6 @@ Thumbs.db
 
 # Temporary files
 *.log
+
+# virtual environments
+kingsleyenv/
