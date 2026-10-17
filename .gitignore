@@ -1,3 +1,9 @@
+kingsleyenv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
 # Python virtual environments
 .venv/
 venv/
