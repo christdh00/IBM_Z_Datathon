@@ -14,7 +14,7 @@ class Reading:
     pw_0_5h: int
     window_rows: int
     window_required: int
-    rows: list[dict] | None
+    rows: list[dict]
 
 
 class ReadingWindow:
@@ -33,7 +33,6 @@ class ReadingWindow:
 
         record = _record(streamed["record"])
         self.rows.append(record)
-        ready = len(self.rows) >= self.window_minutes
         return Reading(
             index=index,
             total=streamed["total"],
@@ -45,7 +44,7 @@ class ReadingWindow:
             pw_0_5h=record["PW_0.5h"],
             window_rows=len(self.rows),
             window_required=self.window_minutes,
-            rows=list(self.rows) if ready else None,
+            rows=list(self.rows),
         )
 
 

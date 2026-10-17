@@ -4,8 +4,12 @@ import pandas as pd
 TARGET = "PW_0.5h"
 SENSORS = ["CMS air pressure", "Concentrazione ossigeno base", "Nitrogen pressure", "Oxygen over threshold"]
 BINARY_SENSOR = "Oxygen over threshold"
+# The positive level of ``Oxygen over threshold`` before it is mapped to 1.
+OXYGEN_POSITIVE_LEVEL = 22.437134398135598
 WINDOWS = 20
 STEP = 5
+HORIZONS = (30, 60, 120)
+SURVIVAL_MODEL_NAME = "XGBoost AFT"
 
 # Create survival targets
 def create_survival_targets(data, target=TARGET):
@@ -78,3 +82,40 @@ def create_life_features(data, sensors=SENSORS, window=WINDOWS):
         raise ValueError(f"Need {window} readings, but only received {len(data)}.")
     row = extract_sensor_features(data, sensors)
     return pd.DataFrame([row])
+
+
+def encode_oxygen_over_threshold(data):
+    """Map ``Oxygen over threshold`` to 1 at its positive level and 0 otherwise.
+
+    This matches the encoding used before the survival model was trained.
+    """
+    if BINARY_SENSOR not in data.columns:
+        raise ValueError(f"dataframe must include {BINARY_SENSOR!r}")
+    encoded = data.copy()
+    values = encoded[BINARY_SENSOR].to_numpy(dtype=float)
+    encoded[BINARY_SENSOR] = np.where(np.isclose(values, OXYGEN_POSITIVE_LEVEL), 1, 0)
+    return encoded
+
+
+def prepare_live_features(data, sensors=SENSORS, window=WINDOWS):
+    """Encode oxygen, then build one feature row from the latest ``window`` readings."""
+    return create_life_features(encode_oxygen_over_threshold(data), sensors=sensors, window=window)
+
+
+def trustguard_output(
+    timestamp,
+    failure_30,
+    failure_60,
+    failure_120,
+    median_time_to_failure_min,
+    survival_model=SURVIVAL_MODEL_NAME,
+):
+    """Shape one live survival prediction the way the notebook reports it."""
+    return {
+        "timestamp": timestamp,
+        "survival_model": survival_model,
+        "failure_probability_30_min": float(failure_30),
+        "failure_probability_60_min": float(failure_60),
+        "failure_probability_120_min": float(failure_120),
+        "median_time_to_failure_min": float(median_time_to_failure_min),
+    }

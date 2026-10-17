@@ -5,14 +5,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from app.inference import FailureModel
+from app.inference import FailureModel, SurvivalModel
 from app.payload import combine
 from app.readings import ReadingWindow
 from app.replay import ReplayCursor
 
 cursor = ReplayCursor()
-model = FailureModel()
-window = ReadingWindow(model.window_minutes)
+failure_model = FailureModel()
+survival_model = SurvivalModel()
+window = ReadingWindow(max(failure_model.window_minutes, survival_model.window_minutes))
 latest: dict | None = None
 subscribers: set[asyncio.Queue] = set()
 
@@ -25,21 +26,32 @@ PAGE = """<!doctype html>
 <body>
   <p id="status">waiting for the first row</p>
   <p id="model"></p>
+  <p id="survival"></p>
   <pre id="row"></pre>
   <script>
     const status = document.getElementById("status");
     const model = document.getElementById("model");
+    const survival = document.getElementById("survival");
     const row = document.getElementById("row");
+    function formatProbability(value) {
+      return value >= 0.0001 ? value.toFixed(4) : value.toExponential(2);
+    }
     function show(data) {
       status.textContent = (data.index + 1) + " / " + data.total;
       if (data.status === "too_small_window") {
         model.textContent = "too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
       } else {
         const call = data.failure_predicted ? "failure" : "no failure";
-        const probability = data.failure_probability >= 0.0001
-          ? data.failure_probability.toFixed(4)
-          : data.failure_probability.toExponential(2);
-        model.textContent = "failure probability " + probability + " (" + call + ")";
+        model.textContent = "failure probability " + formatProbability(data.failure_probability) + " (" + call + ")";
+      }
+      if (data.survival_status === "more_data_required") {
+        survival.textContent = "more data required (" + data.window_rows + " / " + data.survival_window_required + " minutes)";
+      } else {
+        survival.textContent = data.survival_model
+          + " — 30 min " + data.failure_probability_30_min.toFixed(4)
+          + ", 60 min " + data.failure_probability_60_min.toFixed(4)
+          + ", 120 min " + data.failure_probability_120_min.toFixed(4)
+          + ", median " + data.median_time_to_failure_min.toFixed(4) + " min";
       }
       row.textContent = JSON.stringify(data, null, 2);
     }
@@ -56,8 +68,13 @@ PAGE = """<!doctype html>
 async def publish(row: dict) -> None:
     global latest
     reading = window.observe(row)
-    prediction = model.predict(reading.rows) if reading.rows is not None else None
-    latest = combine(reading, prediction)
+    failure = None
+    if len(reading.rows) >= failure_model.window_minutes:
+        failure = failure_model.predict(reading.rows[-failure_model.window_minutes :])
+    survival = None
+    if len(reading.rows) >= survival_model.window_minutes:
+        survival = survival_model.predict(reading.rows)
+    latest = combine(reading, failure, survival, survival_model.window_minutes)
     for queue in list(subscribers):
         queue.put_nowait(latest)
 
