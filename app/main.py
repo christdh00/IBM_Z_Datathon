@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 
+from app.inference import StreamScorer
 from app.replay import ReplayCursor
 
 cursor = ReplayCursor()
+scorer = StreamScorer()
 latest: dict | None = None
 subscribers: set[asyncio.Queue] = set()
 
@@ -19,12 +21,23 @@ PAGE = """<!doctype html>
 </head>
 <body>
   <p id="status">waiting for the first row</p>
+  <p id="model"></p>
   <pre id="row"></pre>
   <script>
     const status = document.getElementById("status");
+    const model = document.getElementById("model");
     const row = document.getElementById("row");
     function show(data) {
       status.textContent = (data.index + 1) + " / " + data.total;
+      if (data.status === "too_small_window") {
+        model.textContent = "too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
+      } else {
+        const call = data.failure_predicted ? "failure" : "no failure";
+        const probability = data.failure_probability >= 0.0001
+          ? data.failure_probability.toFixed(4)
+          : data.failure_probability.toExponential(2);
+        model.textContent = "failure probability " + probability + " (" + call + ")";
+      }
       row.textContent = JSON.stringify(data, null, 2);
     }
     fetch("/api/snapshot").then(r => r.json()).then(data => {
@@ -39,9 +52,9 @@ PAGE = """<!doctype html>
 
 async def publish(row: dict) -> None:
     global latest
-    latest = row
+    latest = scorer.score(row)
     for queue in list(subscribers):
-        queue.put_nowait(row)
+        queue.put_nowait(latest)
 
 
 @asynccontextmanager

@@ -18,12 +18,7 @@ class ReplayCursor:
         payload = {
             "index": self.index,
             "total": len(self.rows),
-            "timestamp": str(row["timestamp"]),
-            "cms_air_pressure": float(row["CMS air pressure"]),
-            "oxygen_concentration": float(row["Concentrazione ossigeno base"]),
-            "nitrogen_pressure": float(row["Nitrogen pressure"]),
-            "oxygen_over_threshold": float(row["Oxygen over threshold"]),
-            "pw_0_5h": int(row["PW_0.5h"]),
+            "record": row,
         }
         self.index = (self.index + 1) % len(self.rows)
         return payload
