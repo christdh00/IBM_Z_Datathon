@@ -20,9 +20,9 @@ GAUSSIAN_SHARE_OF_SPECIAL = 0.5  # split those modified rows ~50/50 across the t
 OVERLAP_EVENT_FRACTION = 0.20  # nested overlap event for ~20% of ordinary primary events
 SAME_SENSOR_OVERLAP_PROBABILITY = 0.20
 MIN_GAP = 0
-READING_WINDOWS = (5, 10, 30, 60)
-DURATIONS = (3, 5, 10, 30, 60)
-SEVERITIES_SD = (0.5, 1.0, 2.0, 3.0)
+READING_WINDOWS = (60,)
+DURATIONS = (5, 10, 30, 60)
+SEVERITIES_SD = (0.5, 1.0, 2.5, 5.0)
 SENSOR_COLS = ("CMS air pressure", "Concentrazione ossigeno base", "Nitrogen pressure")
 
 
