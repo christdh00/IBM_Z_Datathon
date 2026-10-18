@@ -9,7 +9,7 @@ from fault_injection import generate_contamination_dataset, compute_reference_st
 
 # Configuration: edit here, then execute from project root.
 DATA_FOLDER = Path("PW_0.5h")
-SOURCE_SPLIT = "validation"   # validation for development, test for final evaluation
+SOURCE_SPLIT = "test"   # validation for development, test for final evaluation
 OUTPUT_FOLDER = Path("contamination_benchmarks")
 TARGET_PERCENTAGES = (0, 0.5, 1, 2, 5, 10)  # % of rows with any *sensor modification*
 REPLICATES = 2
