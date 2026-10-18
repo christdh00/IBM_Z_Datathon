@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import xgboost as xgb
@@ -36,6 +37,21 @@ COLUMNS = [
     "Oxygen over threshold",
     "PW_0.5h",
 ]
+FOREST_MODEL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "binary_classification"
+    / "models"
+    / "random_forest_model_v1.joblib"
+)
+
+
+def lagged_features(rows: list[dict], window_minutes: int) -> pd.DataFrame:
+    """Lag one reading window the same way the binary models were trained."""
+    frame = pd.DataFrame(rows, columns=COLUMNS)
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+    frame = frame.set_index("timestamp")
+    lagged = lag_window(encode_oxygen_over_threshold(frame), window_minutes)
+    return lagged.drop(columns=["PW_0.5h"])
 
 
 class FailureModel:
@@ -64,11 +80,7 @@ class FailureModel:
         }
 
     def _weighted_probability(self, rows: list[dict]):
-        frame = pd.DataFrame(rows, columns=COLUMNS)
-        frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-        frame = frame.set_index("timestamp")
-        lagged = lag_window(encode_oxygen_over_threshold(frame), self.window_minutes)
-        features = lagged.drop(columns=["PW_0.5h"])
+        features = lagged_features(rows, self.window_minutes)
         for column in features.columns:
             if column.startswith("Oxygen over threshold_lag_"):
                 features[column] = pd.Categorical(
@@ -80,6 +92,29 @@ class FailureModel:
         if self.iteration_range is not None:
             predict_kwargs["iteration_range"] = self.iteration_range
         return self.model.predict(matrix, **predict_kwargs)
+
+
+class RandomForestModel:
+    """Predict a failure probability with the scikit-learn random forest."""
+
+    def __init__(self, model_path: Path = FOREST_MODEL_PATH) -> None:
+        self.window_minutes = WINDOW_MINUTES
+        saved = joblib.load(model_path)
+        self.model = saved["model"]
+        self.threshold = float(saved["threshold"])
+
+    def predict(self, rows: list[dict]) -> dict:
+        if len(rows) != self.window_minutes:
+            raise ValueError(
+                f"model expects {self.window_minutes} rows, received {len(rows)}"
+            )
+        features = lagged_features(rows, self.window_minutes)
+        probability = float(self.model.predict_proba(features)[:, 1][0])
+        return {
+            "forest_failure_probability": probability,
+            "forest_threshold": self.threshold,
+            "forest_failure_predicted": probability >= self.threshold,
+        }
 
 
 SURVIVAL_MODEL_PATH = (

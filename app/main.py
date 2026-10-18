@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from app.inference import FailureModel, SurvivalModel
+from app.inference import FailureModel, RandomForestModel, SurvivalModel
 from app.payload import combine
 from app.readings import ReadingWindow
 from app.replay import ReplayCursor
 
 cursor = ReplayCursor()
 failure_model = FailureModel()
+forest_model = RandomForestModel()
 survival_model = SurvivalModel()
 window = ReadingWindow(max(failure_model.window_minutes, survival_model.window_minutes))
 latest: dict | None = None
@@ -26,11 +27,13 @@ PAGE = """<!doctype html>
 <body>
   <p id="status">waiting for the first row</p>
   <p id="model"></p>
+  <p id="forest"></p>
   <p id="survival"></p>
   <pre id="row"></pre>
   <script>
     const status = document.getElementById("status");
     const model = document.getElementById("model");
+    const forest = document.getElementById("forest");
     const survival = document.getElementById("survival");
     const row = document.getElementById("row");
     function formatProbability(value) {
@@ -40,9 +43,12 @@ PAGE = """<!doctype html>
       status.textContent = (data.index + 1) + " / " + data.total;
       if (data.status === "too_small_window") {
         model.textContent = "too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
+        forest.textContent = "random forest: too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
       } else {
         const call = data.failure_predicted ? "failure" : "no failure";
-        model.textContent = "failure probability " + formatProbability(data.failure_probability) + " (" + call + ")";
+        model.textContent = "xgboost failure probability " + formatProbability(data.failure_probability) + " (" + call + ")";
+        const forestCall = data.forest_failure_predicted ? "failure" : "no failure";
+        forest.textContent = "random forest probability " + formatProbability(data.forest_failure_probability) + " (" + forestCall + ")";
       }
       if (data.survival_status === "more_data_required") {
         survival.textContent = "more data required (" + data.window_rows + " / " + data.survival_window_required + " minutes)";
@@ -69,12 +75,21 @@ async def publish(row: dict) -> None:
     global latest
     reading = window.observe(row)
     failure = None
+    forest = None
     if len(reading.rows) >= failure_model.window_minutes:
-        failure = failure_model.predict(reading.rows[-failure_model.window_minutes :])
+        window_rows = reading.rows[-failure_model.window_minutes :]
+        failure = failure_model.predict(window_rows)
+        forest = forest_model.predict(window_rows)
     survival = None
     if len(reading.rows) >= survival_model.window_minutes:
         survival = survival_model.predict(reading.rows)
-    latest = combine(reading, failure, survival, survival_model.window_minutes)
+    latest = combine(
+        reading,
+        failure,
+        survival,
+        survival_model.window_minutes,
+        forest,
+    )
     for queue in list(subscribers):
         queue.put_nowait(latest)
 

@@ -9,11 +9,19 @@ SURVIVAL_FIELDS = (
 )
 
 
+FOREST_FIELDS = (
+    "forest_failure_probability",
+    "forest_threshold",
+    "forest_failure_predicted",
+)
+
+
 def combine(
     reading: Reading,
     failure: dict | None,
     survival: dict | None,
     survival_window_minutes: int,
+    forest: dict | None = None,
 ) -> dict:
     """Join the current reading with each model's prediction."""
     payload = {
@@ -38,6 +46,13 @@ def combine(
         payload["status"] = "ready"
         payload["message"] = None
         payload.update(failure)
+
+    if forest is None:
+        for field in FOREST_FIELDS:
+            payload[field] = None
+    else:
+        for field in FOREST_FIELDS:
+            payload[field] = forest[field]
 
     if survival is None:
         payload["survival_status"] = "more_data_required"
