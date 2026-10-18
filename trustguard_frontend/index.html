@@ -15,6 +15,7 @@
         <p class="eyebrow">IBM Z DATATHON</p>
         <h1>TrustGuard Monitor</h1>
         <p class="subtitle">Live sensor replay and model scores</p>
+        <p class="meta timestamp">Timestamp <span id="lastUpdated">No readings yet</span></p>
       </div>
       <div class="actions">
         <span class="status" id="status" role="status">Connecting</span>
@@ -68,7 +69,7 @@
 
     <section class="charts" aria-label="Score and sensor trends">
       <article class="chart-card">
-        <div class="chart-heading"><div><h2>Failure probabilities</h2><p class="subtitle">XGBoost and random forest</p></div><span id="lastUpdated" class="meta">No readings yet</span></div>
+        <div class="chart-heading"><div><h2>Failure probabilities</h2><p class="subtitle">XGBoost and random forest</p></div></div>
         <div class="chart-wrap"><canvas id="failureChart" aria-label="Failure probability trend" role="img"></canvas></div>
       </article>
       <article class="chart-card">
