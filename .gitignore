@@ -39,5 +39,6 @@ Thumbs.db
 
 # virtual environments
 kingsleyenv/
+
 gavrielenv/
 .venv/

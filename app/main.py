@@ -1,12 +1,18 @@
 import asyncio
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
-from app.inference import FailureModel, RandomForestModel, SurvivalModel
-from app.payload import combine
+from app.inference import (
+    FailureModel,
+    IsolationForestModel,
+    RandomForestModel,
+    SurvivalModel,
+)
+from app.payload import combine, with_replay
 from app.readings import ReadingWindow
 from app.replay import ReplayCursor
 
@@ -14,61 +20,29 @@ cursor = ReplayCursor()
 failure_model = FailureModel()
 forest_model = RandomForestModel()
 survival_model = SurvivalModel()
-window = ReadingWindow(max(failure_model.window_minutes, survival_model.window_minutes))
+isolation_model = IsolationForestModel()
+window = ReadingWindow(
+    failure_model.window_minutes,
+    buffer_minutes=max(
+        failure_model.window_minutes,
+        survival_model.window_minutes,
+        isolation_model.window_minutes,
+    ),
+)
 latest: dict | None = None
 subscribers: set[asyncio.Queue] = set()
+FRONTEND_DIR = Path(__file__).resolve().parents[1] / "trustguard_frontend"
 
-PAGE = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Replay</title>
-</head>
-<body>
-  <p id="status">waiting for the first row</p>
-  <p id="model"></p>
-  <p id="forest"></p>
-  <p id="survival"></p>
-  <pre id="row"></pre>
-  <script>
-    const status = document.getElementById("status");
-    const model = document.getElementById("model");
-    const forest = document.getElementById("forest");
-    const survival = document.getElementById("survival");
-    const row = document.getElementById("row");
-    function formatProbability(value) {
-      return value >= 0.0001 ? value.toFixed(4) : value.toExponential(2);
-    }
-    function show(data) {
-      status.textContent = (data.index + 1) + " / " + data.total;
-      if (data.status === "too_small_window") {
-        model.textContent = "too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
-        forest.textContent = "random forest: too small window (" + data.window_rows + " / " + data.window_required + " minutes)";
-      } else {
-        const call = data.failure_predicted ? "failure" : "no failure";
-        model.textContent = "xgboost failure probability " + formatProbability(data.failure_probability) + " (" + call + ")";
-        const forestCall = data.forest_failure_predicted ? "failure" : "no failure";
-        forest.textContent = "random forest probability " + formatProbability(data.forest_failure_probability) + " (" + forestCall + ")";
-      }
-      if (data.survival_status === "more_data_required") {
-        survival.textContent = "more data required (" + data.window_rows + " / " + data.survival_window_required + " minutes)";
-      } else {
-        survival.textContent = data.survival_model
-          + " — 30 min " + data.failure_probability_30_min.toFixed(4)
-          + ", 60 min " + data.failure_probability_60_min.toFixed(4)
-          + ", 120 min " + data.failure_probability_120_min.toFixed(4)
-          + ", median " + data.median_time_to_failure_min.toFixed(4) + " min";
-      }
-      row.textContent = JSON.stringify(data, null, 2);
-    }
-    fetch("/api/snapshot").then(r => r.json()).then(data => {
-      if (data) show(data);
-    });
-    const source = new EventSource("/api/stream");
-    source.onmessage = (event) => show(JSON.parse(event.data));
-  </script>
-</body>
-</html>"""
+
+def broadcast(payload: dict) -> None:
+    for queue in list(subscribers):
+        queue.put_nowait(payload)
+
+
+def notify_replay() -> None:
+    if latest is None:
+        return
+    broadcast(with_replay(latest, cursor.playing))
 
 
 async def publish(row: dict) -> None:
@@ -83,35 +57,97 @@ async def publish(row: dict) -> None:
     survival = None
     if len(reading.rows) >= survival_model.window_minutes:
         survival = survival_model.predict(reading.rows)
-    latest = combine(
-        reading,
-        failure,
-        survival,
-        survival_model.window_minutes,
-        forest,
+    isolation = None
+    if len(reading.rows) >= isolation_model.window_minutes:
+        isolation = isolation_model.predict(
+            reading.rows[-isolation_model.window_minutes :]
+        )
+    latest = with_replay(
+        combine(
+            reading,
+            failure,
+            survival,
+            survival_model.window_minutes,
+            forest,
+            isolation,
+            isolation_model.window_minutes,
+        ),
+        cursor.playing,
     )
+    broadcast(latest)
+
+
+def close_streams() -> None:
+    """End open replay streams so a reload is not stuck on the event source."""
     for queue in list(subscribers):
-        queue.put_nowait(latest)
+        queue.put_nowait(None)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(cursor.run(publish))
-    yield
-    task.cancel()
+    try:
+        yield
+    finally:
+        close_streams()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def page() -> str:
-    return PAGE
+def _frontend(name: str, media_type: str | None = None) -> FileResponse:
+    return FileResponse(
+        FRONTEND_DIR / name,
+        media_type=media_type,
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/")
+async def page() -> FileResponse:
+    return _frontend("index.html")
+
+
+@app.get("/style.css")
+async def styles() -> FileResponse:
+    return _frontend("style.css", "text/css")
+
+
+@app.get("/dashboard.js")
+async def dashboard_script() -> FileResponse:
+    return _frontend("dashboard.js", "text/javascript")
 
 
 @app.get("/api/snapshot")
 async def snapshot():
     return latest
+
+
+@app.get("/api/replay")
+async def replay_status():
+    return cursor.status()
+
+
+@app.post("/api/replay/pause")
+async def pause_replay():
+    status = cursor.pause()
+    notify_replay()
+    return status
+
+
+@app.post("/api/replay/play")
+async def play_replay():
+    status = cursor.play()
+    notify_replay()
+    return status
+
+
+@app.post("/api/replay/restart")
+async def restart_replay():
+    return cursor.restart()
 
 
 @app.get("/api/stream")
@@ -123,6 +159,8 @@ async def stream():
         try:
             while True:
                 row = await queue.get()
+                if row is None:
+                    break
                 yield f"data: {json.dumps(row)}\n\n"
         finally:
             subscribers.discard(queue)

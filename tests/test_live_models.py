@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 import joblib
@@ -5,14 +6,22 @@ import pandas as pd
 import pytest
 from sklearn.ensemble import RandomForestClassifier
 
+from anom_dectection.anom_detection_isolation_forest import extract_features
 from app.inference import (
     COLUMNS,
+    ISO_BASELINE_STATS,
+    ISO_JUMP_THRESHOLDS,
+    ISO_RANGES,
+    ISO_SCALER_PATH,
+    ISO_SENSORS,
     FailureModel,
+    IsolationForestModel,
     RandomForestModel,
+    isolation_features,
     lagged_features,
 )
 from app.payload import combine
-from app.readings import Reading
+from app.readings import Reading, ReadingWindow
 from binary_classification.pipeline_functions import (
     encode_oxygen_over_threshold,
     lag_window,
@@ -161,3 +170,106 @@ def test_combine_leaves_forest_empty_before_the_window_fills():
     assert payload["forest_failure_probability"] is None
     assert payload["forest_threshold"] is None
     assert payload["forest_failure_predicted"] is None
+
+
+def _streamed(index: int) -> dict:
+    return {
+        "index": index,
+        "total": 10,
+        "record": {
+            "timestamp": f"2023-08-01 03:{index:02d}:00",
+            "CMS air pressure": -0.5,
+            "Concentrazione ossigeno base": -0.9,
+            "Nitrogen pressure": -1.3,
+            "Oxygen over threshold": OXYGEN_LOW,
+            "PW_0.5h": 0,
+        },
+    }
+
+
+def test_reading_window_keeps_a_longer_history_than_it_reports():
+    window = ReadingWindow(2, buffer_minutes=4)
+
+    reading = None
+    for index in range(4):
+        reading = window.observe(_streamed(index))
+
+    assert reading is not None
+    assert reading.window_required == 2
+    assert reading.window_rows == 4
+    assert len(reading.rows) == 4
+
+
+def test_reading_window_rejects_a_buffer_shorter_than_the_reported_window():
+    with pytest.raises(ValueError, match="buffer_minutes"):
+        ReadingWindow(30, buffer_minutes=20)
+
+
+def test_isolation_features_match_the_fitted_scaler():
+    rows = _rows(60)
+    features = isolation_features(rows)
+    scaler = joblib.load(ISO_SCALER_PATH)
+    expected = extract_features(
+        pd.DataFrame(rows).loc[:, ISO_SENSORS],
+        ISO_RANGES,
+        ISO_JUMP_THRESHOLDS,
+        ISO_BASELINE_STATS,
+    )
+
+    pd.testing.assert_frame_equal(features, expected)
+    assert list(features.columns) == list(scaler.feature_names_in_)
+
+
+def test_isolation_forest_rejects_a_short_window():
+    with pytest.raises(ValueError, match="60"):
+        IsolationForestModel().predict(_rows(30))
+
+
+def test_isolation_forest_scores_a_training_window():
+    result = IsolationForestModel().predict(_train_rows(60))
+
+    assert math.isfinite(result["isolation_trust_score"])
+    assert result["isolation_anomaly"] in (True, False)
+
+
+def test_combine_includes_isolation_prediction():
+    payload = combine(
+        _reading(),
+        {"failure_probability": 0.1, "threshold": 0.22, "failure_predicted": False},
+        None,
+        20,
+        {
+            "forest_failure_probability": 0.4,
+            "forest_threshold": 0.34,
+            "forest_failure_predicted": True,
+        },
+        {"isolation_trust_score": 0.66, "isolation_anomaly": True},
+        60,
+    )
+
+    assert payload["isolation_status"] == "ready"
+    assert payload["isolation_message"] is None
+    assert payload["isolation_trust_score"] == 0.66
+    assert payload["isolation_anomaly"] is True
+    assert payload["isolation_window_required"] == 60
+
+
+def test_combine_holds_isolation_until_its_window_is_ready():
+    payload = combine(
+        _reading(),
+        {"failure_probability": 0.1, "threshold": 0.22, "failure_predicted": False},
+        None,
+        20,
+        {
+            "forest_failure_probability": 0.4,
+            "forest_threshold": 0.34,
+            "forest_failure_predicted": True,
+        },
+    )
+
+    assert payload["status"] == "ready"
+    assert payload["isolation_status"] == "too_small_window"
+    assert payload["isolation_message"] == "too small window"
+    assert payload["isolation_trust_score"] is None
+    assert payload["isolation_anomaly"] is None
+    assert payload["isolation_window_required"] == 60

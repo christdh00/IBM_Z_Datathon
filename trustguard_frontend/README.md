@@ -1,22 +1,13 @@
-# TrustGuard frontend (HTML/CSS/JavaScript)
+# TrustGuard frontend
 
-This is a frontend-only prototype. There is no Python, Flask, or backend requirement.
+The dashboard is served by the FastAPI app in `app/`. It listens to `/api/stream` and renders each payload: sensor readings, XGBoost, random forest, isolation forest, and survival scores.
 
-## Open
-Open `index.html` in your browser with an internet connection. Chart.js is loaded from a CDN. Press **Add demo reading** several times to populate the three score cards and trend graph. Press **Reset** to clear.
+## Run
 
-## Connect TrustGuard later
-Call the globally available function in `dashboard.js` with real timestamped data:
+From the repository root:
 
-```javascript
-addTrustGuardReading({
-  timestamp: '2023-09-22T00:22:00',
-  ml_score: 0.15,
-  survival_score: 0.08,
-  anomaly_score: 0.32
-});
+```bash
+uvicorn app.main:app --reload
 ```
 
-The numerical scores shown above are examples only. The frontend does **not** assume a score range or thresholds. If the backend score schema differs, update `addTrustGuardReading` to map backend fields.
-
-When an API is available, connect using `fetch` from a hosted frontend and call `addTrustGuardReading(...)` on each received timestamped reading. For cross-origin requests, the backend must permit the frontend origin via CORS.
+Open http://127.0.0.1:8000. Pause, Play, and Restart control the replay cursor. The page also shows the latest payload JSON.

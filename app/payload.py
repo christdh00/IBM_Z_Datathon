@@ -16,12 +16,20 @@ FOREST_FIELDS = (
 )
 
 
+ISOLATION_FIELDS = (
+    "isolation_trust_score",
+    "isolation_anomaly",
+)
+
+
 def combine(
     reading: Reading,
     failure: dict | None,
     survival: dict | None,
     survival_window_minutes: int,
     forest: dict | None = None,
+    isolation: dict | None = None,
+    isolation_window_minutes: int = 60,
 ) -> dict:
     """Join the current reading with each model's prediction."""
     payload = {
@@ -36,6 +44,7 @@ def combine(
         "window_rows": reading.window_rows,
         "window_required": reading.window_required,
         "survival_window_required": survival_window_minutes,
+        "isolation_window_required": isolation_window_minutes,
     }
     if failure is None:
         payload["status"] = "too_small_window"
@@ -54,6 +63,17 @@ def combine(
         for field in FOREST_FIELDS:
             payload[field] = forest[field]
 
+    if isolation is None:
+        payload["isolation_status"] = "too_small_window"
+        payload["isolation_message"] = "too small window"
+        for field in ISOLATION_FIELDS:
+            payload[field] = None
+    else:
+        payload["isolation_status"] = "ready"
+        payload["isolation_message"] = None
+        for field in ISOLATION_FIELDS:
+            payload[field] = isolation[field]
+
     if survival is None:
         payload["survival_status"] = "more_data_required"
         payload["survival_message"] = "more data required"
@@ -65,4 +85,10 @@ def combine(
     payload["survival_message"] = None
     for field in SURVIVAL_FIELDS:
         payload[field] = survival[field]
+    return payload
+
+
+def with_replay(payload: dict, playing: bool) -> dict:
+    """Attach whether the replay cursor is advancing."""
+    payload["replay_playing"] = playing
     return payload

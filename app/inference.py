@@ -7,6 +7,7 @@ import pandas as pd
 import xgboost as xgb
 from scipy.stats import norm
 
+from anom_dectection.anom_detection_isolation_forest import extract_features
 from binary_classification.pipeline_functions import (
     encode_oxygen_over_threshold,
     lag_window,
@@ -166,3 +167,72 @@ class SurvivalModel:
             failure_120=failure[2],
             median_time_to_failure_min=float(np.exp(margin)),
         )
+
+
+ISO_WINDOW_MINUTES = 60
+ISO_MODEL_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "anom_dectection"
+    / "iso_forest_nitrogen.pkl"
+)
+ISO_SCALER_PATH = (
+    Path(__file__).resolve().parents[1] / "anom_dectection" / "iso_scaler.pkl"
+)
+ISO_SENSORS = [
+    "CMS air pressure",
+    "Concentrazione ossigeno base",
+    "Nitrogen pressure",
+    "Oxygen over threshold",
+]
+# Same limits the isolation forest notebook used when it fit the scaler.
+ISO_RANGES = {
+    "CMS air pressure": (0, 9.5),
+    "Concentrazione ossigeno base": (5, 500),
+    "Nitrogen pressure": (0, 9),
+    "Oxygen over threshold": (0, 1),
+}
+ISO_JUMP_THRESHOLDS = {
+    "CMS air pressure": 5,
+    "Concentrazione ossigeno base": 1,
+    "Nitrogen pressure": 0.2,
+    "Oxygen over threshold": 0.1,
+}
+ISO_BASELINE_STATS = {
+    "CMS air pressure": (1000, 10),
+    "Concentrazione ossigeno base": (21, 1),
+    "Nitrogen pressure": (2.0, 0.2),
+    "Oxygen over threshold": (-0.045, 22.5),
+}
+
+
+def isolation_features(rows: list[dict]) -> pd.DataFrame:
+    """Summarize one reading window the same way the isolation forest was trained."""
+    sensors = pd.DataFrame(rows).loc[:, ISO_SENSORS]
+    return extract_features(sensors, ISO_RANGES, ISO_JUMP_THRESHOLDS, ISO_BASELINE_STATS)
+
+
+class IsolationForestModel:
+    """Score one 60-minute reading window with the fitted isolation forest."""
+
+    def __init__(
+        self,
+        model_path: Path = ISO_MODEL_PATH,
+        scaler_path: Path = ISO_SCALER_PATH,
+    ) -> None:
+        self.window_minutes = ISO_WINDOW_MINUTES
+        self.model = joblib.load(model_path)
+        self.scaler = joblib.load(scaler_path)
+
+    def predict(self, rows: list[dict]) -> dict:
+        if len(rows) != self.window_minutes:
+            raise ValueError(
+                f"model expects {self.window_minutes} rows, received {len(rows)}"
+            )
+        features = isolation_features(rows).loc[:, self.scaler.feature_names_in_]
+        scaled = self.scaler.transform(features)
+        trust_score = float(-self.model.score_samples(scaled)[0])
+        anomaly = int(self.model.predict(scaled)[0]) == -1
+        return {
+            "isolation_trust_score": trust_score,
+            "isolation_anomaly": anomaly,
+        }

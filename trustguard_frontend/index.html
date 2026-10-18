@@ -11,15 +11,84 @@
 <body>
   <main class="dashboard">
     <header class="header">
-      <div><p class="eyebrow">IBM Z DATATHON</p><h1>TrustGuard Monitor</h1><p class="subtitle">Model anomaly score monitoring</p></div>
-      <div class="actions"><span class="status" id="status">● Demo mode</span><button id="demoButton" type="button">Add demo reading</button><button id="resetButton" class="secondary" type="button">Reset</button></div>
+      <div>
+        <p class="eyebrow">IBM Z DATATHON</p>
+        <h1>TrustGuard Monitor</h1>
+        <p class="subtitle">Live sensor replay and model scores</p>
+      </div>
+      <div class="actions">
+        <span class="status" id="status" role="status">Connecting</span>
+        <span class="meta" id="progressLabel">Waiting for the first reading</span>
+        <button id="pauseButton" type="button">Pause</button>
+        <button id="playButton" class="secondary" type="button">Play</button>
+        <button id="restartButton" class="secondary" type="button">Restart</button>
+      </div>
     </header>
-    <section class="scores" aria-label="Current TrustGuard scores">
-      <article class="score-card"><h2>ML Model</h2><p id="mlScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
-      <article class="score-card"><h2>Survival Model</h2><p id="survivalScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
-      <article class="score-card"><h2>Anomaly Model</h2><p id="anomalyScore" class="number">—</p><p class="meta">Latest TrustGuard score</p></article>
+    <div class="progress-track" aria-hidden="true"><div id="progressBar" class="progress-fill"></div></div>
+    <p class="warmup" id="warmup"></p>
+
+    <section class="sensors" aria-label="Current sensor readings">
+      <article class="sensor-card"><h2>CMS air pressure</h2><p id="cmsValue" class="value">—</p></article>
+      <article class="sensor-card"><h2>Oxygen concentration</h2><p id="oxygenValue" class="value">—</p></article>
+      <article class="sensor-card"><h2>Nitrogen pressure</h2><p id="nitrogenValue" class="value">—</p></article>
+      <article class="sensor-card"><h2>Oxygen over threshold</h2><p id="thresholdValue" class="value">—</p></article>
+      <article class="sensor-card"><h2>PW 0.5h</h2><p id="pwValue" class="value">—</p></article>
     </section>
-    <section class="chart-card"><div class="chart-heading"><div><h2>Score trends</h2><p class="subtitle">TrustGuard scores over time</p></div><span id="lastUpdated" class="meta">No readings yet</span></div><div class="chart-wrap"><canvas id="scoreChart" aria-label="TrustGuard score trend chart" role="img"></canvas></div><p class="hint">Placeholder data is for frontend testing only. No scores are actual model results, and no alert thresholds are assumed.</p></section>
+
+    <section class="scores" aria-label="Current model scores">
+      <article class="score-card" id="xgboostCard">
+        <div class="card-top"><h2>XGBoost</h2><span class="badge wait" id="xgboostBadge">Waiting</span></div>
+        <p id="xgboostScore" class="number">—</p>
+        <p class="meta">Failure probability</p>
+        <p class="detail" id="xgboostDetail"></p>
+      </article>
+      <article class="score-card" id="forestCard">
+        <div class="card-top"><h2>Random forest</h2><span class="badge wait" id="forestBadge">Waiting</span></div>
+        <p id="forestScore" class="number">—</p>
+        <p class="meta">Failure probability</p>
+        <p class="detail" id="forestDetail"></p>
+      </article>
+      <article class="score-card" id="isolationCard">
+        <div class="card-top"><h2>Isolation forest</h2><span class="badge wait" id="isolationBadge">Waiting</span></div>
+        <p id="isolationScore" class="number">—</p>
+        <p class="meta">Trust score</p>
+        <p class="detail" id="isolationDetail"></p>
+      </article>
+      <article class="score-card" id="survivalCard">
+        <div class="card-top"><h2>Survival</h2><span class="badge wait" id="survivalBadge">Waiting</span></div>
+        <p id="survivalScore" class="number">—</p>
+        <p class="meta" id="survivalMeta">Median time to failure</p>
+        <div class="horizon" aria-label="Survival failure probabilities">
+          <div class="horizon-row"><span>30 min</span><div class="bar"><div id="horizon30"></div></div><b id="p30">—</b></div>
+          <div class="horizon-row"><span>60 min</span><div class="bar"><div id="horizon60"></div></div><b id="p60">—</b></div>
+          <div class="horizon-row"><span>120 min</span><div class="bar"><div id="horizon120"></div></div><b id="p120">—</b></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="charts" aria-label="Score and sensor trends">
+      <article class="chart-card">
+        <div class="chart-heading"><div><h2>Failure probabilities</h2><p class="subtitle">XGBoost and random forest</p></div><span id="lastUpdated" class="meta">No readings yet</span></div>
+        <div class="chart-wrap"><canvas id="failureChart" aria-label="Failure probability trend" role="img"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <div class="chart-heading"><div><h2>Survival horizons</h2><p class="subtitle">Failure probability at 30, 60, and 120 minutes</p></div></div>
+        <div class="chart-wrap"><canvas id="survivalChart" aria-label="Survival probability trend" role="img"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <div class="chart-heading"><div><h2>Isolation trust</h2><p class="subtitle">Higher means more anomalous</p></div></div>
+        <div class="chart-wrap"><canvas id="isolationChart" aria-label="Isolation trust score trend" role="img"></canvas></div>
+      </article>
+      <article class="chart-card">
+        <div class="chart-heading"><div><h2>Sensors</h2><p class="subtitle">Latest replayed readings</p></div></div>
+        <div class="chart-wrap"><canvas id="sensorChart" aria-label="Sensor trend" role="img"></canvas></div>
+      </article>
+    </section>
+
+    <section class="chart-card json-card">
+      <div class="chart-heading"><div><h2>Payload</h2><p class="subtitle">Latest JSON from the replay stream</p></div></div>
+      <pre id="payload">Waiting for the first reading</pre>
+    </section>
   </main>
 </body>
 </html>

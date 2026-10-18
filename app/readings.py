@@ -18,11 +18,18 @@ class Reading:
 
 
 class ReadingWindow:
-    """Keep the readings the model needs and describe the current row."""
+    """Keep recent readings and describe the current row.
 
-    def __init__(self, window_minutes: int) -> None:
+    ``window_minutes`` is the count reported as required. ``buffer_minutes``
+    is how many rows are retained, so a longer model can read the same stream.
+    """
+
+    def __init__(self, window_minutes: int, buffer_minutes: int | None = None) -> None:
+        history = window_minutes if buffer_minutes is None else buffer_minutes
+        if history < window_minutes:
+            raise ValueError("buffer_minutes must be at least window_minutes")
         self.window_minutes = window_minutes
-        self.rows: deque[dict] = deque(maxlen=window_minutes)
+        self.rows: deque[dict] = deque(maxlen=history)
         self._last_index: int | None = None
 
     def observe(self, streamed: dict) -> Reading:
