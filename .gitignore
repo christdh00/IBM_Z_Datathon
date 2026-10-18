@@ -36,3 +36,9 @@ Thumbs.db
 
 # Temporary files
 *.log
+
+# virtual environments
+kingsleyenv/
+
+gavrielenv/
+.venv/

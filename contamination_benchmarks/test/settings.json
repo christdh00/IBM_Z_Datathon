@@ -1,0 +1,38 @@
+{
+  "source_split": "test",
+  "source_file": "PW_0.5h\\test.csv",
+  "training_reference_file": "PW_0.5h\\train.csv",
+  "target_percentages": [
+    0,
+    0.5,
+    1,
+    2,
+    5,
+    10
+  ],
+  "replicates": 2,
+  "random_seed": 42,
+  "special_share": 0.075,
+  "gaussian_share_of_special": 0.5,
+  "overlap_event_fraction": 0.2,
+  "same_sensor_overlap_probability": 0.2,
+  "min_gap": 0,
+  "reading_windows": [
+    60
+  ],
+  "durations": [
+    5,
+    10,
+    30,
+    60
+  ],
+  "severities_sd": [
+    0.5,
+    1.0,
+    2.5,
+    5.0
+  ],
+  "contamination_definition": "Distinct rows whose final numeric sensor values differ from original",
+  "anomaly_definition": "synthetic_anomaly=1 for active non-benign faults",
+  "special_definition": "modified rows in Gaussian noise or active intermittent-fault phases"
+}

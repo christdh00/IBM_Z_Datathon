@@ -1,0 +1,397 @@
+const MAX_POINTS = 120;
+const history = [];
+let playing = true;
+let connected = false;
+let awaitingRestart = false;
+let renderedIndex = null;
+
+const statusEl = document.getElementById('status');
+const progressLabel = document.getElementById('progressLabel');
+const progressBar = document.getElementById('progressBar');
+const warmup = document.getElementById('warmup');
+const payloadEl = document.getElementById('payload');
+const lastUpdated = document.getElementById('lastUpdated');
+const pauseButton = document.getElementById('pauseButton');
+const playButton = document.getElementById('playButton');
+const restartButton = document.getElementById('restartButton');
+
+function series(label, color) {
+  return {
+    label,
+    data: [],
+    borderColor: color,
+    backgroundColor: color,
+    tension: 0.25,
+    pointRadius: 0,
+    borderWidth: 2,
+    spanGaps: false,
+  };
+}
+
+function makeChart(canvasId, datasets, yTitle) {
+  return new Chart(document.getElementById(canvasId), {
+    type: 'line',
+    data: { labels: [], datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { labels: { color: '#cbd5e1' } } },
+      scales: {
+        x: {
+          ticks: { color: '#9aa9c6', maxTicksLimit: 8 },
+          grid: { color: '#273650' },
+        },
+        y: {
+          ticks: { color: '#9aa9c6' },
+          grid: { color: '#273650' },
+          title: { display: true, text: yTitle, color: '#9aa9c6' },
+        },
+      },
+    },
+  });
+}
+
+const failureChart = makeChart('failureChart', [
+  series('XGBoost', '#61a5fa'),
+  series('Random forest', '#c084fc'),
+], 'Failure probability');
+const survivalChart = makeChart('survivalChart', [
+  series('30 min', '#2ed6ad'),
+  series('60 min', '#5eead4'),
+  series('120 min', '#fbbf24'),
+], 'Failure probability');
+const isolationChart = makeChart('isolationChart', [
+  series('Trust score', '#ffba68'),
+], 'Trust score');
+const sensorChart = makeChart('sensorChart', [
+  series('CMS air pressure', '#61a5fa'),
+  series('Oxygen concentration', '#2ed6ad'),
+  series('Nitrogen pressure', '#ffba68'),
+  series('Oxygen over threshold', '#c084fc'),
+], 'Sensor value');
+const charts = [failureChart, survivalChart, isolationChart, sensorChart];
+
+function finiteOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatProbability(value) {
+  if (!Number.isFinite(value)) return '—';
+  const magnitude = Math.abs(value);
+  if (magnitude !== 0 && magnitude < 0.0001) return value.toExponential(2);
+  return (value * 100).toFixed(2) + '%';
+}
+
+function formatScore(value) {
+  if (!Number.isFinite(value)) return '—';
+  const magnitude = Math.abs(value);
+  if (magnitude !== 0 && (magnitude < 0.0001 || magnitude >= 10000)) return value.toExponential(2);
+  return value.toFixed(4);
+}
+
+function formatSensor(value) {
+  return Number.isFinite(value) ? value.toFixed(3) : '—';
+}
+
+function formatMinutes(value) {
+  if (!Number.isFinite(value)) return '—';
+  const magnitude = Math.abs(value);
+  if (magnitude !== 0 && (magnitude < 0.0001 || magnitude >= 10000)) return value.toExponential(2) + ' min';
+  if (magnitude >= 100) return value.toFixed(0) + ' min';
+  return value.toFixed(1) + ' min';
+}
+
+function shortTime(timestamp) {
+  const text = String(timestamp ?? '');
+  const parts = text.split(' ');
+  return parts.length > 1 ? parts[1] : text;
+}
+
+function renderConnection() {
+  statusEl.classList.remove('live', 'paused', 'offline');
+  if (!connected) {
+    statusEl.textContent = 'Disconnected';
+    statusEl.classList.add('offline');
+    return;
+  }
+  if (playing) {
+    statusEl.textContent = 'Live';
+    statusEl.classList.add('live');
+  } else {
+    statusEl.textContent = 'Paused';
+    statusEl.classList.add('paused');
+  }
+}
+
+function setTransport(isPlaying) {
+  playing = isPlaying;
+  pauseButton.classList.toggle('secondary', !isPlaying);
+  playButton.classList.toggle('secondary', isPlaying);
+  renderConnection();
+}
+
+function setBusy(busy) {
+  [pauseButton, playButton, restartButton].forEach((button) => {
+    button.disabled = busy;
+  });
+}
+
+function setBadge(id, kind, text) {
+  const badge = document.getElementById(id);
+  badge.className = 'badge ' + kind;
+  badge.textContent = text;
+}
+
+function setCardState(cardId, kind) {
+  document.getElementById(cardId).classList.remove('ok', 'alert');
+  if (kind === 'ok' || kind === 'alert') document.getElementById(cardId).classList.add(kind);
+}
+
+function setBar(id, value) {
+  const width = Number.isFinite(value) ? Math.min(100, Math.max(0, value * 100)) : 0;
+  document.getElementById(id).style.width = width + '%';
+}
+
+function windowDetail(rows, required, message) {
+  return (message || 'warming up') + ' · ' + rows + ' / ' + required + ' min';
+}
+
+function renderModels(data) {
+  const binaryReady = data.status === 'ready';
+  document.getElementById('xgboostScore').textContent = binaryReady
+    ? formatProbability(finiteOrNull(data.failure_probability))
+    : '—';
+  document.getElementById('forestScore').textContent = binaryReady
+    ? formatProbability(finiteOrNull(data.forest_failure_probability))
+    : '—';
+  if (!binaryReady) {
+    const detail = windowDetail(data.window_rows, data.window_required, data.message);
+    document.getElementById('xgboostDetail').textContent = detail;
+    document.getElementById('forestDetail').textContent = detail;
+    setBadge('xgboostBadge', 'wait', 'Warming up');
+    setBadge('forestBadge', 'wait', 'Warming up');
+    setCardState('xgboostCard', 'wait');
+    setCardState('forestCard', 'wait');
+  } else {
+    const xgboostAlert = Boolean(data.failure_predicted);
+    const forestAlert = Boolean(data.forest_failure_predicted);
+    document.getElementById('xgboostDetail').textContent =
+      'Threshold ' + formatProbability(finiteOrNull(data.threshold))
+      + ' · ' + (xgboostAlert ? 'failure' : 'no failure');
+    document.getElementById('forestDetail').textContent =
+      'Threshold ' + formatProbability(finiteOrNull(data.forest_threshold))
+      + ' · ' + (forestAlert ? 'failure' : 'no failure');
+    setBadge('xgboostBadge', xgboostAlert ? 'alert' : 'ok', xgboostAlert ? 'Failure' : 'No failure');
+    setBadge('forestBadge', forestAlert ? 'alert' : 'ok', forestAlert ? 'Failure' : 'No failure');
+    setCardState('xgboostCard', xgboostAlert ? 'alert' : 'ok');
+    setCardState('forestCard', forestAlert ? 'alert' : 'ok');
+  }
+
+  const isolationReady = data.isolation_status === 'ready';
+  const isolationScore = finiteOrNull(data.isolation_trust_score);
+  document.getElementById('isolationScore').textContent = isolationReady ? formatScore(isolationScore) : '—';
+  if (!isolationReady) {
+    document.getElementById('isolationDetail').textContent = windowDetail(
+      data.window_rows,
+      data.isolation_window_required,
+      data.isolation_message,
+    );
+    setBadge('isolationBadge', 'wait', 'Warming up');
+    setCardState('isolationCard', 'wait');
+  } else {
+    const anomaly = Boolean(data.isolation_anomaly);
+    document.getElementById('isolationDetail').textContent = anomaly ? 'Anomaly' : 'Normal';
+    setBadge('isolationBadge', anomaly ? 'alert' : 'ok', anomaly ? 'Anomaly' : 'Normal');
+    setCardState('isolationCard', anomaly ? 'alert' : 'ok');
+  }
+
+  const survivalReady = data.survival_status === 'ready';
+  const p30 = finiteOrNull(data.failure_probability_30_min);
+  const p60 = finiteOrNull(data.failure_probability_60_min);
+  const p120 = finiteOrNull(data.failure_probability_120_min);
+  document.getElementById('p30').textContent = formatProbability(p30);
+  document.getElementById('p60').textContent = formatProbability(p60);
+  document.getElementById('p120').textContent = formatProbability(p120);
+  setBar('horizon30', p30);
+  setBar('horizon60', p60);
+  setBar('horizon120', p120);
+  if (!survivalReady) {
+    document.getElementById('survivalScore').textContent = '—';
+    document.getElementById('survivalMeta').textContent = windowDetail(
+      data.window_rows,
+      data.survival_window_required,
+      data.survival_message,
+    );
+    setBadge('survivalBadge', 'wait', 'Warming up');
+    setCardState('survivalCard', 'wait');
+  } else {
+    document.getElementById('survivalScore').textContent = formatMinutes(finiteOrNull(data.median_time_to_failure_min));
+    document.getElementById('survivalMeta').textContent = data.survival_model || 'Median time to failure';
+    setBadge('survivalBadge', 'ready', 'Ready');
+    setCardState('survivalCard', 'wait');
+  }
+}
+
+function renderWarmup(data) {
+  const waiting = [];
+  if (data.status !== 'ready') {
+    waiting.push('XGBoost and random forest ' + data.window_rows + '/' + data.window_required + ' min');
+  }
+  if (data.survival_status !== 'ready') {
+    waiting.push('survival ' + data.window_rows + '/' + data.survival_window_required + ' min');
+  }
+  if (data.isolation_status !== 'ready') {
+    waiting.push('isolation forest ' + data.window_rows + '/' + data.isolation_window_required + ' min');
+  }
+  warmup.textContent = waiting.length ? 'Filling windows — ' + waiting.join(' · ') : 'All models are scoring this reading.';
+}
+
+function renderCharts() {
+  const labels = history.map((point) => point.label);
+  charts.forEach((chart) => {
+    chart.data.labels = labels;
+  });
+  failureChart.data.datasets[0].data = history.map((point) => point.xgboost);
+  failureChart.data.datasets[1].data = history.map((point) => point.forest);
+  survivalChart.data.datasets[0].data = history.map((point) => point.s30);
+  survivalChart.data.datasets[1].data = history.map((point) => point.s60);
+  survivalChart.data.datasets[2].data = history.map((point) => point.s120);
+  isolationChart.data.datasets[0].data = history.map((point) => point.isolation);
+  sensorChart.data.datasets[0].data = history.map((point) => point.cms);
+  sensorChart.data.datasets[1].data = history.map((point) => point.oxygen);
+  sensorChart.data.datasets[2].data = history.map((point) => point.nitrogen);
+  sensorChart.data.datasets[3].data = history.map((point) => point.oxygenThreshold);
+  charts.forEach((chart) => chart.update());
+}
+
+function remember(point) {
+  const last = history[history.length - 1];
+  if (last && last.index === point.index) {
+    history[history.length - 1] = point;
+    return;
+  }
+  history.push(point);
+  if (history.length > MAX_POINTS) history.shift();
+}
+
+function show(data) {
+  if (awaitingRestart) {
+    if (data.index !== 0) return;
+    awaitingRestart = false;
+  }
+  connected = true;
+  if (typeof data.replay_playing === 'boolean') setTransport(data.replay_playing);
+  if (renderedIndex !== null && data.index < renderedIndex) history.length = 0;
+  renderedIndex = data.index;
+
+  const position = data.index + 1;
+  const fraction = data.total ? (position / data.total) * 100 : 0;
+  progressBar.style.width = fraction + '%';
+  progressLabel.textContent = 'Reading ' + position.toLocaleString() + ' / ' + Number(data.total).toLocaleString();
+  lastUpdated.textContent = String(data.timestamp ?? '');
+
+  document.getElementById('cmsValue').textContent = formatSensor(finiteOrNull(data.cms_air_pressure));
+  document.getElementById('oxygenValue').textContent = formatSensor(finiteOrNull(data.oxygen_concentration));
+  document.getElementById('nitrogenValue').textContent = formatSensor(finiteOrNull(data.nitrogen_pressure));
+  document.getElementById('thresholdValue').textContent = formatSensor(finiteOrNull(data.oxygen_over_threshold));
+  document.getElementById('pwValue').textContent = data.pw_0_5h == null ? '—' : String(data.pw_0_5h);
+  renderModels(data);
+  renderWarmup(data);
+  payloadEl.textContent = JSON.stringify(data, null, 2);
+
+  const binaryReady = data.status === 'ready';
+  const survivalReady = data.survival_status === 'ready';
+  const isolationReady = data.isolation_status === 'ready';
+  remember({
+    index: data.index,
+    label: shortTime(data.timestamp),
+    xgboost: binaryReady ? finiteOrNull(data.failure_probability) : null,
+    forest: binaryReady ? finiteOrNull(data.forest_failure_probability) : null,
+    s30: survivalReady ? finiteOrNull(data.failure_probability_30_min) : null,
+    s60: survivalReady ? finiteOrNull(data.failure_probability_60_min) : null,
+    s120: survivalReady ? finiteOrNull(data.failure_probability_120_min) : null,
+    isolation: isolationReady ? finiteOrNull(data.isolation_trust_score) : null,
+    cms: finiteOrNull(data.cms_air_pressure),
+    oxygen: finiteOrNull(data.oxygen_concentration),
+    nitrogen: finiteOrNull(data.nitrogen_pressure),
+    oxygenThreshold: finiteOrNull(data.oxygen_over_threshold),
+  });
+  renderCharts();
+}
+
+function clearHistory() {
+  history.length = 0;
+  renderedIndex = null;
+  renderCharts();
+}
+
+async function control(action) {
+  setBusy(true);
+  try {
+    const response = await fetch('/api/replay/' + action, { method: 'POST' });
+    if (!response.ok) return;
+    const body = await response.json();
+    setTransport(Boolean(body.playing));
+  } finally {
+    setBusy(false);
+  }
+}
+
+pauseButton.addEventListener('click', () => control('pause'));
+playButton.addEventListener('click', () => control('play'));
+restartButton.addEventListener('click', async () => {
+  awaitingRestart = true;
+  clearHistory();
+  progressBar.style.width = '0%';
+  progressLabel.textContent = 'Restarting';
+  setBusy(true);
+  try {
+    const response = await fetch('/api/replay/restart', { method: 'POST' });
+    if (!response.ok) {
+      awaitingRestart = false;
+      return;
+    }
+    const body = await response.json();
+    setTransport(Boolean(body.playing));
+  } catch {
+    awaitingRestart = false;
+  } finally {
+    setBusy(false);
+  }
+});
+
+fetch('/api/replay')
+  .then((response) => response.json())
+  .then((body) => setTransport(Boolean(body.playing)))
+  .catch(() => {
+    connected = false;
+    renderConnection();
+  });
+
+let seenStream = false;
+fetch('/api/snapshot')
+  .then((response) => response.json())
+  .then((data) => {
+    if (data && !seenStream) show(data);
+  })
+  .catch(() => {
+    connected = false;
+    renderConnection();
+  });
+
+const source = new EventSource('/api/stream');
+source.onopen = () => {
+  connected = true;
+  renderConnection();
+};
+source.onmessage = (event) => {
+  seenStream = true;
+  show(JSON.parse(event.data));
+};
+source.onerror = () => {
+  connected = false;
+  renderConnection();
+};
