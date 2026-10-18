@@ -86,6 +86,17 @@
       </article>
     </section>
 
+    <section class="chart-card ai-advice-card" aria-label="AI maintenance recommendation">
+      <div class="chart-heading">
+        <div>
+          <h2>IBM Granite AI Recommendation</h2>
+          <p class="subtitle">Maintenance insights powered by Granite 4.0 350M on IBM LinuxONE</p>
+        </div>
+      </div>
+      <button id="adviceButton" type="button" disabled>Generate AI Recommendation</button>
+      <p id="adviceText" class="ai-advice-text" role="status" aria-live="polite">Waiting for model predictions.</p>
+    </section>
+
     <section class="chart-card json-card">
       <div class="chart-heading"><div><h2>Payload</h2><p class="subtitle">Latest JSON from the replay stream</p></div></div>
       <pre id="payload">Waiting for the first reading</pre>

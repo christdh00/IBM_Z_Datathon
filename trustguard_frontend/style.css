@@ -57,3 +57,26 @@ button.secondary { background: #273753; color: #e8eefb; }
 @media (max-width: 650px) {
   .scores, .sensors { grid-template-columns: 1fr; }
 }
+
+
+/* AI recommendation panel */
+.ai-advice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ai-advice-card button {
+  align-self: flex-start;
+}
+
+.ai-advice-card button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ai-advice-text {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  color: #cbd5e1;
+}

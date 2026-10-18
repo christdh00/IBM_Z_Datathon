@@ -170,3 +170,29 @@ async def stream():
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
+
+from fastapi import HTTPException
+from pydantic import BaseModel
+from .granite import generate_maintenance_advice
+import asyncio
+
+class AdviceRequest(BaseModel):
+    predictions: dict
+
+@app.post("/api/advice")
+async def generate_advice(request: AdviceRequest):
+    try:
+        advice = await asyncio.to_thread(
+            generate_maintenance_advice,
+            request.predictions
+        )
+        return {"advice": advice}
+
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=502,
+            detail="IBM Granite is unavailable"
+        )
