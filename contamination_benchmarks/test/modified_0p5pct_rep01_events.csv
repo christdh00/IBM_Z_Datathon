@@ -1,0 +1,12 @@
+event_id,sensor,fault_type,start,duration,severity_sd,seed,end_exclusive,start_timestamp,end_timestamp,intended_anomalous_readings,final_sensor_rows_different,is_negative_control
+F00001,Nitrogen pressure,gaussian_noise,9982,2,0.05,599239715,9984,2023-09-28 22:25:00,2023-09-28 22:26:00,0,2,1
+F00002,Concentrazione ossigeno base,intermittent_fault,11006,2,5.0,2087408566,11008,2023-09-29 15:29:00,2023-09-29 15:30:00,1,1,0
+F00003,CMS air pressure,intermittent_fault,3736,2,0.5,58127178,3738,2023-09-24 14:19:00,2023-09-24 14:20:00,1,1,0
+F00004,CMS air pressure,dropout,7118,30,,1492765730,7148,2023-09-26 22:41:00,2023-09-26 23:10:00,30,30,0
+F00005,CMS air pressure,bias,7215,5,5.0,374194153,7220,2023-09-27 00:18:00,2023-09-27 00:22:00,5,5,0
+F00006,Nitrogen pressure,spike,9365,1,5.0,601217393,9366,2023-09-28 12:08:00,2023-09-28 12:08:00,1,1,0
+F00007,Concentrazione ossigeno base,dropout,6444,5,,517559061,6449,2023-09-26 11:27:00,2023-09-26 11:31:00,5,5,0
+F00008,Concentrazione ossigeno base,random_corruption,6475,5,2.5,1582597778,6480,2023-09-26 11:58:00,2023-09-26 12:02:00,5,5,0
+F00009,Concentrazione ossigeno base,increased_noise,3642,5,1.0,2916320,3647,2023-09-24 12:45:00,2023-09-24 12:49:00,5,5,0
+F00010,Concentrazione ossigeno base,spike,8456,1,5.0,1652774796,8457,2023-09-27 20:59:00,2023-09-27 20:59:00,1,1,0
+F00011,Nitrogen pressure,dropout,8456,1,,2014481354,8457,2023-09-27 20:59:00,2023-09-27 20:59:00,1,1,0
