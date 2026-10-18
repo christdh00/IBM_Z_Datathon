@@ -4,6 +4,8 @@ let playing = true;
 let connected = false;
 let awaitingRestart = false;
 let renderedIndex = null;
+let latestAdviceSnapshot = null;
+let generatingAdvice = false;
 
 const statusEl = document.getElementById('status');
 const progressLabel = document.getElementById('progressLabel');
@@ -14,6 +16,8 @@ const lastUpdated = document.getElementById('lastUpdated');
 const pauseButton = document.getElementById('pauseButton');
 const playButton = document.getElementById('playButton');
 const restartButton = document.getElementById('restartButton');
+const adviceButton = document.getElementById('adviceButton');
+const adviceText = document.getElementById('adviceText');
 
 function series(label, color) {
   return {
@@ -299,6 +303,8 @@ function show(data) {
   document.getElementById('thresholdValue').textContent = formatSensor(finiteOrNull(data.oxygen_over_threshold));
   document.getElementById('pwValue').textContent = data.pw_0_5h == null ? '—' : String(data.pw_0_5h);
   renderModels(data);
+  latestAdviceSnapshot = data;
+  adviceButton.disabled = generatingAdvice || !adviceReady(data);
   renderWarmup(data);
   payloadEl.textContent = JSON.stringify(data, null, 2);
 
@@ -345,6 +351,9 @@ playButton.addEventListener('click', () => control('play'));
 restartButton.addEventListener('click', async () => {
   awaitingRestart = true;
   clearHistory();
+  latestAdviceSnapshot = null;
+  adviceButton.disabled = true;
+  adviceText.textContent = 'Waiting for new model predictions.';
   progressBar.style.width = '0%';
   progressLabel.textContent = 'Restarting';
   setBusy(true);
@@ -395,3 +404,67 @@ source.onerror = () => {
   connected = false;
   renderConnection();
 };
+
+async function requestGraniteAdvice(predictions) {
+    const response = await fetch("/api/advice", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ predictions })
+    });
+
+    if (!response.ok) {
+        throw new Error("Unable to generate advice");
+    }
+
+    const result = await response.json();
+    return result.advice;
+}
+
+// AI ADVICE INTEGRATION
+function adviceReady(data) {
+  return Boolean(
+    data &&
+    data.status === 'ready' &&
+    data.survival_status === 'ready' &&
+    data.isolation_status === 'ready'
+  );
+}
+
+adviceButton.addEventListener('click', async () => {
+  const data = latestAdviceSnapshot;
+  if (!adviceReady(data) || generatingAdvice) return;
+
+  // Freeze the prediction snapshot while the live replay continues.
+  const predictions = {
+    timestamp: data.timestamp,
+    survival_model: data.survival_model,
+    failure_probability_30_min: data.failure_probability_30_min,
+    failure_probability_60_min: data.failure_probability_60_min,
+    failure_probability_120_min: data.failure_probability_120_min,
+    median_time_to_failure_min: data.median_time_to_failure_min,
+    failure_probability: data.failure_probability,
+    forest_failure_probability: data.forest_failure_probability,
+    isolation_trust_score: data.isolation_trust_score,
+    isolation_anomaly: data.isolation_anomaly,
+    cms_air_pressure: data.cms_air_pressure,
+    oxygen_concentration: data.oxygen_concentration,
+    nitrogen_pressure: data.nitrogen_pressure
+  };
+
+  generatingAdvice = true;
+  adviceButton.disabled = true;
+  adviceText.textContent = 'IBM Granite is analyzing the predictions. Please wait...';
+
+  try {
+    const advice = await requestGraniteAdvice(predictions);
+    adviceText.textContent = advice || 'No recommendation was returned.';
+  } catch (error) {
+    console.error('Granite error:', error);
+    adviceText.textContent = 'Unable to generate a recommendation. Please try again.';
+  } finally {
+    generatingAdvice = false;
+    adviceButton.disabled = !adviceReady(latestAdviceSnapshot);
+  }
+});
